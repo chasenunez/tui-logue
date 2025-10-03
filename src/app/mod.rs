@@ -28,6 +28,7 @@ pub mod state;
 #[cfg(test)]
 mod test;
 pub mod ui;
+pub mod git;
 
 pub use runner::HandleInputReturnType;
 pub use runner::run;
