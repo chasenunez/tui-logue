@@ -1,11 +1,9 @@
-use chrono::Local;
 use anyhow::{anyhow, bail};
 use arboard::Clipboard;
-use std::path::PathBuf;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use ratatui::{
     Frame,
-    layout::{Rect, Layout, Constraint, Direction},
+    layout::Rect,
     prelude::Margin,
     style::{Color, Style},
     symbols,
@@ -20,92 +18,6 @@ use tui_textarea::{CursorMove, Scrolling, TextArea};
 use super::Styles;
 use super::commands::ClipboardOperation;
 
-/// Result of processing an input in the Entry box.
-pub enum EntryBoxInputResult {
-    /// Entry box consumed the input (no submission).
-    Handled,
-    /// Entry box submitted a line (Enter pressed) — returned string is the submitted text.
-    Submitted(String),
-}
-
-/// A small single-line input that sits above the Content editor.
-pub struct EntryBox<'a> {
-    input_area: TextArea<'a>,
-    is_active: bool,
-}
-
-impl<'a> EntryBox<'a> {
-    pub fn new() -> Self {
-        // initialize with an empty single line
-        let ta = TextArea::new(vec!["".to_string()]);
-        Self {
-            input_area: ta,
-            is_active: true,
-        }
-    }
-
-    /// Handle a single input event. Returns:
-    /// - `Submitted(text)` when Enter was pressed (and text was non-empty),
-    /// - `Handled` if the entry box consumed the input (but didn't submit),
-    /// - (we don't return NotHandled here — caller can decide to route input elsewhere if desired)
-    pub fn handle_input(&mut self, input: &Input) -> EntryBoxInputResult {
-        let key_event = KeyEvent::from(input);
-
-        match key_event.code {
-            KeyCode::Enter => {
-                // Grab the first line (this box is single-line) and trim it.
-                let line = self
-                    .input_area
-                    .lines()
-                    .first()
-                    .map(|s| s.trim().to_string())
-                    .unwrap_or_default();
-
-                // clear the input area
-                self.input_area = TextArea::new(vec!["".to_string()]);
-
-                if !line.is_empty() {
-                    EntryBoxInputResult::Submitted(line)
-                } else {
-                    EntryBoxInputResult::Handled
-                }
-            }
-            _ => {
-                // Let the textarea consume anything else (typing, cursor movement inside the box).
-                // This makes the box behave like a normal input field when active.
-                let _ = self.input_area.input(key_event);
-                EntryBoxInputResult::Handled
-            }
-        }
-    }
-
-    pub fn render(&mut self, frame: &mut Frame, area: Rect, is_active: bool) {
-        // If you want to show active/inactive styles later, you can branch on is_active.
-        self.input_area.set_block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Entry"),
-        );
-
-        // Optionally set cursor style only when active
-        if is_active {
-            self.input_area.set_cursor_line_style(Style::reset());
-        } else {
-            self.input_area.set_cursor_line_style(Style::default());
-        }
-
-        frame.render_widget(&self.input_area, area);
-    }
-
-    pub fn set_active(&mut self, active: bool) {
-        self.is_active = active;
-    }
-
-    pub fn is_active(&self) -> bool {
-        self.is_active
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorMode {
     Normal,
@@ -115,10 +27,6 @@ pub enum EditorMode {
 
 pub struct Editor<'a> {
     text_area: TextArea<'a>,
-
-    /// The small entry box rendered above the content area.
-    entry_box: EntryBox<'a>,
-
     mode: EditorMode,
     is_active: bool,
     is_dirty: bool,
@@ -139,36 +47,14 @@ impl From<&Input> for KeyEvent {
 impl<'a> Editor<'a> {
     pub fn new() -> Editor<'a> {
         let text_area = TextArea::default();
-        let entry_box = EntryBox::new();
 
         Editor {
             text_area,
-            entry_box,
             mode: EditorMode::Normal,
             is_active: false,
             is_dirty: false,
             has_unsaved: false,
         }
-    }
-
-    /// Append a line to the content with a local timestamp "[HH:MM] Entry"
-    pub fn append_entry<D: DataProvider>(&mut self, entry: &str, app: &App<D>) {
-        let now = Local::now();
-        let timestamp = now.format("[%H:%M]").to_string();
-        let line = format!("{} {}", timestamp, entry);
-
-        // Insert the line and a newline after it
-        if !self.text_area.insert_str(&line) {
-            // If insertion failed for some reason, try re-creating the TextArea.
-            let mut lines: Vec<String> = self.text_area.lines().iter().cloned().collect();
-            lines.push(line);
-            self.text_area = TextArea::new(lines);
-        } else {
-            self.text_area.insert_newline();
-        }
-
-        self.is_dirty = true;
-        self.refresh_has_unsaved(app);
     }
 
     #[inline]
@@ -206,11 +92,6 @@ impl<'a> Editor<'a> {
         self.text_area = text_area;
 
         self.refresh_has_unsaved(app);
-
-        let repo_path = PathBuf::from("/Users/nunezcha/Documents/log_cold_storage");
-        let message = format!("Auto commit: new entry at {}", Local::now().to_rfc3339());
-        let _repo = repo_path.clone();
-        let _msg = message.clone();
     }
 
     pub fn handle_input_prioritized<D: DataProvider>(
@@ -218,21 +99,9 @@ impl<'a> Editor<'a> {
         input: &Input,
         app: &App<D>,
     ) -> anyhow::Result<HandleInputReturnType> {
-        // If the entry box is active, route input to it first.
-        if self.entry_box.is_active() {
-            match self.entry_box.handle_input(input) {
-                EntryBoxInputResult::Submitted(line) => {
-                    self.append_entry(&line, app);
-                    return Ok(HandleInputReturnType::Handled);
-                }
-                EntryBoxInputResult::Handled => {
-                    return Ok(HandleInputReturnType::Handled);
-                }
-            }
-        }
-
         if self.is_insert_mode() {
-            // We must handle clipboard operation separately if sync with system clipboard is activated
+            // We must handle clipboard operation separately if sync with system clipboard is
+            // activated
             if app.settings.sync_os_clipboard {
                 let has_ctrl = input.modifiers.contains(KeyModifiers::CONTROL);
                 // Keymaps are taken from `text_area` source code
@@ -276,19 +145,6 @@ impl<'a> Editor<'a> {
         app: &App<D>,
     ) -> anyhow::Result<HandleInputReturnType> {
         debug_assert!(!self.is_insert_mode());
-
-        // If the entry box is active, route input to it (it will consume everything while active).
-        if self.entry_box.is_active() {
-            match self.entry_box.handle_input(input) {
-                EntryBoxInputResult::Submitted(line) => {
-                    self.append_entry(&line, app);
-                    return Ok(HandleInputReturnType::Handled);
-                }
-                EntryBoxInputResult::Handled => {
-                    return Ok(HandleInputReturnType::Handled);
-                }
-            }
-        }
 
         if app.get_current_entry().is_none() {
             return Ok(HandleInputReturnType::Handled);
@@ -468,24 +324,10 @@ impl<'a> Editor<'a> {
             _ => {}
         }
 
-        // When switching to non-normal modes we don't automatically change the Entry box state.
-        // Entry box remains controlled by explicit toggles to avoid interfering with editor keybindings.
         self.mode = mode;
     }
 
-    /// Renders the Entry box (single row) on top and the editor content below.
-    /// This keeps the external caller unchanged — just pass the same `area` you used to pass.
     pub fn render_widget(&mut self, frame: &mut Frame, area: Rect, styles: &Styles) {
-        // split area: small fixed height for Entry (3) and the rest for the content editor
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(1)])
-            .split(area);
-
-        // Render entry box in the top chunk.
-        self.entry_box.render(frame, chunks[0], self.entry_box.is_active());
-
-        // The rest of the rendering for the editor stays the same, but uses chunks[1] now.
         let mut title = "Content".to_owned();
         if self.is_active {
             let mode_caption = match self.mode {
@@ -534,11 +376,10 @@ impl<'a> Editor<'a> {
         self.text_area
             .set_selection_style(Style::default().bg(Color::White).fg(Color::Black));
 
-        // Render the content into the lower chunk
-        frame.render_widget(&self.text_area, chunks[1]);
+        frame.render_widget(&self.text_area, area);
 
-        self.render_vertical_scrollbar(frame, chunks[1]);
-        self.render_horizontal_scrollbar(frame, chunks[1]);
+        self.render_vertical_scrollbar(frame, area);
+        self.render_horizontal_scrollbar(frame, area);
     }
 
     pub fn render_vertical_scrollbar(&mut self, frame: &mut Frame, area: Rect) {
@@ -606,24 +447,8 @@ impl<'a> Editor<'a> {
             self.set_editor_mode(EditorMode::Normal);
         }
 
-        // when losing overall focus we also make sure the entry box is deactivated
-        if !active {
-            self.entry_box.set_active(false);
-        }
-
         self.is_active = active;
     }
-
-    /// Programmatically activate/deactivate the Entry box (useful for wiring a toggle key).
-    ///pub fn set_entry_active(&mut self, active: bool) {
-    ///    self.entry_box.set_active(active);
-    ///}
-
-    /// Toggle entry box active state.
-    ///pub fn toggle_entry_active(&mut self) {
-    ///    let new_state = !self.entry_box.is_active();
-    ///    self.entry_box.set_active(new_state);
-    ///}
 
     pub fn get_content(&self) -> String {
         let lines = self.text_area.lines().to_vec();

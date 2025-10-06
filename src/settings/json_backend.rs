@@ -1,12 +1,15 @@
 use std::path::PathBuf;
 
-#[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
+use serde::{Deserialize, Serialize};
+
+use super::get_default_data_dir;
+
+#[derive(Debug, Deserialize, Serialize, Default)]
 pub struct JsonBackend {
     #[serde(default)]
     pub file_path: Option<PathBuf>,
 }
 
-/// Return the fixed path to entries.json in your desired folder
 pub fn get_default_json_path() -> anyhow::Result<PathBuf> {
-    Ok(PathBuf::from("/Users/nunezcha/Documents/log_cold_storage/entries.json"))
+    Ok(get_default_data_dir()?.join("entries.json"))
 }
