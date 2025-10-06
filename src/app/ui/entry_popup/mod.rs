@@ -288,17 +288,19 @@ impl EntryPopup<'_> {
 
     fn validate_date(&mut self) {
         // Expect format "YYYY_MM_DD_Day"
-        let input = self.date_txt.lines()[0].as_str();
+        let input = self.date_txt.lines().next().unwrap_or("");
         let parts: Vec<&str> = input.split('_').collect();
+
         if parts.len() != 4 {
             self.date_err_msg = "Use YYYY_MM_DD_Day".into();
             return;
         }
-        if let (Ok(y), Ok(m), Ok(d)) = (
-            parts[0].parse::<i32>(),
-            parts[1].parse::<u32>(),
-            parts[2].parse::<u32>(),
-        ) {
+
+        let year_res = parts[0].parse::<i32>();
+        let month_res = parts[1].parse::<u32>();
+        let day_res = parts[2].parse::<u32>();
+
+        if let (Ok(y), Ok(m), Ok(d)) = (year_res, month_res, day_res) {
             if NaiveDate::from_ymd_opt(y, m, d).is_some() {
                 self.date_err_msg.clear();
             } else {

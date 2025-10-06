@@ -1,6 +1,7 @@
 use anyhow::{anyhow, bail};
 use arboard::Clipboard;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
 use ratatui::{
     Frame,
     layout::{Rect, Layout, Constraint, Direction},
@@ -8,6 +9,7 @@ use ratatui::{
     style::{Color, Style},
     symbols,
     widgets::{Block, Borders, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    prelude::Widget, // <--- needed for render() on TextArea
 };
 
 use crate::app::{App, keymap::Input, runner::HandleInputReturnType};
@@ -17,6 +19,7 @@ use tui_textarea::{CursorMove, Scrolling, TextArea};
 
 use super::Styles;
 use super::commands::ClipboardOperation;
+
 
 /// Modes for the Content editor
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
