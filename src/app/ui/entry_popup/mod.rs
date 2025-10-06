@@ -1,4 +1,3 @@
-use anyhow::Ok;
 use chrono::{Datelike, Local, NaiveDate, TimeZone, Utc};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
@@ -7,6 +6,7 @@ use ratatui::{
     style::{Color, Style},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
+use std::result::Result::Ok; // <-- Correct import
 use tui_textarea::{CursorMove, TextArea};
 
 use crate::{
@@ -26,7 +26,6 @@ const FOOTER_TEXT: &str = "Enter or <Ctrl-m>: confirm | Esc or <Ctrl-c>: Cancel 
 const FOOTER_MARGIN: u16 = 15;
 
 pub struct EntryPopup<'a> {
-    // Date, Priority, Tags (Title field removed)
     date_txt: TextArea<'a>,
     tags_txt: TextArea<'a>,
     priority_txt: TextArea<'a>,
@@ -45,44 +44,30 @@ enum ActiveText {
     Tags,
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum EntryPopupInputReturn {
-    KeepPopup,
-    Cancel,
-    AddEntry(u32),
-    UpdateCurrentEntry,
-}
-
 impl EntryPopup<'_> {
-    pub fn new_entry(settings: &Settings) -> Self {
-        // Date field with format "YYYY_MM_DD_DayOfWeek"
-        let date = Local::now();
-        let date_str = format!(
-            "{:04}_{:02}_{:02}_{}",
-            date.year(),
-            date.month(),
-            date.day(),
-            date.format("%A")
-        );
-        let date_txt = TextArea::new(vec![date_str]);
+    fn validate_date(&mut self) {
+        // Expect format "YYYY_MM_DD_Day"
+        let input = self.date_txt.lines().get(0).map(|s| s.as_str()).unwrap_or("");
+        let parts: Vec<&str> = input.split('_').collect();
 
-        let tags_txt = TextArea::default();
-        let priority_txt = if let Some(priority) = settings.default_journal_priority {
-            TextArea::new(vec![priority.to_string()])
-        } else {
-            TextArea::default()
-        };
+        if parts.len() != 4 {
+            self.date_err_msg = "Use YYYY_MM_DD_Day".into();
+            return;
+        }
 
-        Self {
-            date_txt,
-            tags_txt,
-            priority_txt,
-            is_edit_entry: false,
-            active_txt: ActiveText::Date,
-            date_err_msg: String::default(),
-            tags_err_msg: String::default(),
-            priority_err_msg: String::default(),
-            tags_popup: None,
+        let year_res = parts[0].parse::<i32>();
+        let month_res = parts[1].parse::<u32>();
+        let day_res = parts[2].parse::<u32>();
+
+        match (year_res, month_res, day_res) {
+            (Ok(y), Ok(m), Ok(d)) => {
+                if NaiveDate::from_ymd_opt(y, m, d).is_some() {
+                    self.date_err_msg.clear();
+                } else {
+                    self.date_err_msg = "Invalid date".into();
+                }
+            }
+            _ => self.date_err_msg = "Date format error".into(),
         }
     }
 
@@ -426,10 +411,10 @@ impl EntryPopup<'_> {
         }
 
         // Use the date string as the title (since no title field)
-        let title = self.date_txt.lines()[0].to_owned();
+        let title = self.date_txt.lines().get(0).unwrap_or(&String::new()).to_owned();
 
         // Parse the date (ignore day-of-week portion)
-        let input = self.date_txt.lines()[0].as_str();
+        let input = self.date_txt.lines().get(0).map(|s| s.as_str()).unwrap_or("");
         let parts: Vec<&str> = input.split('_').collect();
         let year = parts[0].parse().unwrap();
         let month = parts[1].parse().unwrap();
@@ -441,11 +426,11 @@ impl EntryPopup<'_> {
         let tags = text_to_tags(
             self.tags_txt
                 .lines()
-                .first()
+                .get(0)
                 .expect("Tags TextBox have one line"),
         );
-        let priority = match self.priority_txt.lines().first().unwrap() {
-            num if num.is_empty() => None,
+        let priority = match self.priority_txt.lines().get(0).unwrap_or(&String::new()).as_str() {
+            "" => None,
             num => Some(num.parse().expect("Priority must be validated")),
         };
 
