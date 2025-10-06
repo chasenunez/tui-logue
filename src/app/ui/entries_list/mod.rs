@@ -5,7 +5,6 @@ use ratatui::{
     layout::{Alignment, Rect},
     prelude::Margin,
     style::Style,
-    symbols,
     text::{Line, Span},
     widgets::{
         Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
@@ -16,9 +15,9 @@ use ratatui::{
 use backend::DataProvider;
 
 use crate::app::App;
-use crate::{app::keymap::Keymap, settings::DatumVisibility};
+use crate::settings::DatumVisibility;
 
-use super::{Styles, UICommand};
+use super::Styles;
 
 const LIST_INNER_MARGIN: usize = 5;
 
@@ -38,6 +37,23 @@ impl EntriesList {
         }
     }
 
+    /// Set the active state
+    pub fn set_active(&mut self, active: bool) {
+        self.is_active = active;
+    }
+
+    /// Render the widget (called from higher-level UI)
+    pub fn render_widget<D: DataProvider>(
+        &mut self,
+        frame: &mut Frame,
+        app: &App<D>,
+        area: Rect,
+        styles: &Styles,
+    ) {
+        self.render_list(frame, app, area, styles);
+    }
+
+    /// Internal method to render the list
     fn render_list<D: DataProvider>(
         &mut self,
         frame: &mut Frame,
@@ -52,26 +68,24 @@ impl EntriesList {
         let items: Vec<ListItem> = app
             .get_active_entries()
             .map(|entry| {
-                // Determine indentation based on date grouping
                 let current_date = (
                     entry.date.year(),
                     entry.date.month(),
                     entry.date.day(),
                 );
+
                 let mut title_text = entry.title.to_string();
-                // If same date as previous entry, indent
                 if let Some(pd) = prev_date {
                     if pd == current_date {
-                        title_text.insert_str(0, "    "); // indent with 4 spaces
+                        title_text.insert_str(0, "    ");
                     }
                 }
                 prev_date = Some(current_date);
 
-                // Text wrapping for title
-                let title_lines = textwrap::wrap(&title_text, area.width as usize - LIST_INNER_MARGIN);
+                let title_lines =
+                    textwrap::wrap(&title_text, area.width as usize - LIST_INNER_MARGIN);
                 lines_count += title_lines.len();
 
-                // Title style based on selection
                 let highlight_selected =
                     self.multi_select_mode && app.selected_entries.contains(&entry.id);
                 let title_style = match (self.is_active, highlight_selected) {
@@ -84,7 +98,7 @@ impl EntriesList {
                     .map(|line| Line::from(Span::styled(line.to_string(), title_style)))
                     .collect();
 
-                // Date and Priority line(s)
+                // Date and priority
                 let date_priority_lines = match (app.settings.datum_visibility, entry.priority) {
                     (DatumVisibility::Show, Some(prio)) => {
                         let oneliner = format!(
@@ -127,7 +141,7 @@ impl EntriesList {
                 spans.extend(date_lines);
                 lines_count += date_priority_lines.len();
 
-                // Tags (same logic as before)
+                // Tags
                 if !entry.tags.is_empty() {
                     const TAGS_SEPARATOR: &str = " | ";
                     let tags_default_style: Style = jstyles.tags_default.into();
@@ -179,7 +193,6 @@ impl EntriesList {
 
         frame.render_stateful_widget(list, area, &mut self.state);
 
-        // Scrollbar logic unchanged
         if lines_count > area.height as usize - 2 {
             let avg_item_height = lines_count / items_count;
             self.render_scrollbar(
@@ -192,5 +205,29 @@ impl EntriesList {
         }
     }
 
-    // ... (rest of file unchanged) ...
+    /// Returns the block widget for the list
+    fn get_list_block(
+        &self,
+        filtered: bool,
+        _items_count: Option<usize>,
+        styles: &Styles,
+    ) -> Block {
+        let title = if filtered { "Filtered Entries" } else { "Entries" };
+        Block::default()
+            .borders(Borders::ALL)
+            .title(title)
+            .style(styles.journals_list.title_inactive)
+    }
+
+    /// Scrollbar rendering stub (fill in actual logic later)
+    fn render_scrollbar(
+        &self,
+        _frame: &mut Frame,
+        _area: Rect,
+        _selected_index: usize,
+        _items_count: usize,
+        _avg_item_height: usize,
+    ) {
+        // TODO: implement actual scrollbar rendering
+    }
 }
