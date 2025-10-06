@@ -209,15 +209,8 @@ impl<'a> Editor<'a> {
 
         let repo_path = PathBuf::from("/Users/nunezcha/Documents/log_cold_storage");
         let message = format!("Auto commit: new entry at {}", Local::now().to_rfc3339());
-        {
-    let repo = repo_path.clone();
-    let msg = message.clone();
-    std::thread::spawn(move || {
-        if let Err(e) = crate::app::git::commit_and_push(&repo, &msg) {
-            eprintln!("auto git commit failed: {:?}", e);
-                }
-            });
-        }
+        let _repo = repo_path.clone();
+        let _msg = message.clone();
     }
 
     pub fn handle_input_prioritized<D: DataProvider>(
