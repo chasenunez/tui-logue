@@ -186,10 +186,12 @@ impl EntriesList {
             jstyles.highlight_inactive
         };
 
+        let block = self.get_list_block(app.filter.is_some(), Some(items_count), styles);
         let list = List::new(items)
-            .block(self.get_list_block(app.filter.is_some(), Some(items_count), styles))
+            .block(block)
             .highlight_style(highlight_style)
             .highlight_symbol("> ");
+
 
         frame.render_stateful_widget(list, area, &mut self.state);
 

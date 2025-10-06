@@ -414,7 +414,7 @@ impl EntryPopup<'_> {
         let title = self.date_txt.lines().get(0).unwrap_or(&String::new()).to_owned();
 
         // Parse the date (ignore day-of-week portion)
-        let input = self.date_txt.lines().get(0).map(|s| s.as_str()).unwrap_or("");
+        let input = self.date_txt.get(0).map(|s| s.as_str()).unwrap_or("");
         let parts: Vec<&str> = input.split('_').collect();
         let year = parts[0].parse().unwrap();
         let month = parts[1].parse().unwrap();
