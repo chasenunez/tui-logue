@@ -26,13 +26,12 @@ const FOOTER_TEXT: &str = "Enter or <Ctrl-m>: confirm | Esc or <Ctrl-c>: Cancel 
 const FOOTER_MARGIN: u16 = 15;
 
 pub struct EntryPopup<'a> {
-    title_txt: TextArea<'a>,
+    // Date, Priority, Tags (Title field removed)
     date_txt: TextArea<'a>,
     tags_txt: TextArea<'a>,
     priority_txt: TextArea<'a>,
     is_edit_entry: bool,
     active_txt: ActiveText,
-    title_err_msg: String,
     date_err_msg: String,
     tags_err_msg: String,
     priority_err_msg: String,
@@ -41,10 +40,9 @@ pub struct EntryPopup<'a> {
 
 #[derive(Debug, PartialEq, Eq)]
 enum ActiveText {
-    Title,
     Date,
-    Tags,
     Priority,
+    Tags,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -57,19 +55,18 @@ pub enum EntryPopupInputReturn {
 
 impl EntryPopup<'_> {
     pub fn new_entry(settings: &Settings) -> Self {
-        let title_txt = TextArea::default();
-
+        // Date field with format "YYYY_MM_DD_DayOfWeek"
         let date = Local::now();
-
-        let date_txt = TextArea::new(vec![format!(
-            "{:02}-{:02}-{}",
-            date.day(),
+        let date_str = format!(
+            "{:04}_{:02}_{:02}_{}",
+            date.year(),
             date.month(),
-            date.year()
-        )]);
+            date.day(),
+            date.format("%A")
+        );
+        let date_txt = TextArea::new(vec![date_str]);
 
         let tags_txt = TextArea::default();
-
         let priority_txt = if let Some(priority) = settings.default_journal_priority {
             TextArea::new(vec![priority.to_string()])
         } else {
@@ -77,13 +74,11 @@ impl EntryPopup<'_> {
         };
 
         Self {
-            title_txt,
             date_txt,
             tags_txt,
             priority_txt,
             is_edit_entry: false,
-            active_txt: ActiveText::Title,
-            title_err_msg: String::default(),
+            active_txt: ActiveText::Date,
             date_err_msg: String::default(),
             tags_err_msg: String::default(),
             priority_err_msg: String::default(),
@@ -92,34 +87,32 @@ impl EntryPopup<'_> {
     }
 
     pub fn from_entry(entry: &Entry) -> Self {
-        let mut title_txt = TextArea::new(vec![entry.title.to_owned()]);
-        title_txt.move_cursor(CursorMove::End);
-
-        let date_txt = TextArea::new(vec![format!(
-            "{:02}-{:02}-{}",
-            entry.date.day(),
-            entry.date.month(),
-            entry.date.year()
-        )]);
+        // Initialize with existing entry data (title ignored)
+        let date = entry.date.with_timezone(&Local);
+        let date_str = format!(
+            "{:04}_{:02}_{:02}_{}",
+            date.year(),
+            date.month(),
+            date.day(),
+            date.format("%A")
+        );
+        let mut date_txt = TextArea::new(vec![date_str]);
+        date_txt.move_cursor(CursorMove::End);
 
         let tags = tags_to_text(&entry.tags);
-
         let mut tags_txt = TextArea::new(vec![tags]);
         tags_txt.move_cursor(CursorMove::End);
 
         let prio = entry.priority.map(|pr| pr.to_string()).unwrap_or_default();
-
         let mut priority_txt = TextArea::new(vec![prio]);
         priority_txt.move_cursor(CursorMove::End);
 
         let mut entry_popup = Self {
-            title_txt,
             date_txt,
             tags_txt,
             priority_txt,
             is_edit_entry: true,
-            active_txt: ActiveText::Title,
-            title_err_msg: String::default(),
+            active_txt: ActiveText::Date,
             date_err_msg: String::default(),
             tags_err_msg: String::default(),
             priority_err_msg: String::default(),
@@ -127,95 +120,52 @@ impl EntryPopup<'_> {
         };
 
         entry_popup.validate_all();
-
         entry_popup
     }
 
     pub fn render_widget(&mut self, frame: &mut Frame, area: Rect, styles: &Styles) {
         let mut area = centered_rect_exact_height(70, 17, area);
-
         const FOOTER_LEN: u16 = FOOTER_TEXT.len() as u16 + FOOTER_MARGIN;
-
         if area.width < FOOTER_LEN {
             area.height += FOOTER_LEN / area.width;
         }
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(if self.is_edit_entry {
-                "Edit journal"
-            } else {
-                "Create journal"
-            });
+        let title = if self.is_edit_entry { "Edit journal" } else { "Create journal" };
+        let block = Block::default().borders(Borders::ALL).title(title);
 
         frame.render_widget(Clear, area);
         frame.render_widget(block, area);
 
+        // Layout for 3 fields + footer
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .horizontal_margin(4)
             .vertical_margin(2)
             .constraints(
                 [
-                    Constraint::Length(3),
-                    Constraint::Length(3),
-                    Constraint::Length(3),
-                    Constraint::Length(3),
-                    Constraint::Min(1),
+                    Constraint::Length(3), // Date
+                    Constraint::Length(3), // Priority
+                    Constraint::Length(3), // Tags
+                    Constraint::Min(1),    // Footer
                 ]
                 .as_ref(),
             )
             .split(area);
 
-        self.title_txt.set_cursor_line_style(Style::default());
-        self.date_txt.set_cursor_line_style(Style::default());
-        self.tags_txt.set_cursor_line_style(Style::default());
-        self.priority_txt.set_cursor_line_style(Style::default());
-
+        // Cursor and block styles
         let gstyles = &styles.general;
-
         let active_block_style = Style::from(gstyles.input_block_active);
         let reset_style = Style::reset();
         let invalid_block_style = Style::from(gstyles.input_block_invalid);
-
         let active_cursor_style = Style::from(gstyles.input_corsur_active);
         let deactivate_cursor_style = Style::default().bg(Color::Reset);
         let invalid_cursor_style = Style::from(gstyles.input_corsur_invalid);
 
-        if self.title_err_msg.is_empty() {
-            let (block, cursor) = match self.active_txt {
-                ActiveText::Title => (active_block_style, active_cursor_style),
-                _ => (reset_style, deactivate_cursor_style),
-            };
-            self.title_txt.set_style(block);
-            self.title_txt.set_cursor_style(cursor);
-            self.title_txt.set_block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .style(block)
-                    .title("Title"),
-            );
-        } else {
-            let cursor = if self.active_txt == ActiveText::Title {
-                invalid_cursor_style
-            } else {
-                deactivate_cursor_style
-            };
-
-            self.title_txt.set_style(invalid_block_style);
-            self.title_txt.set_cursor_style(cursor);
-            self.title_txt.set_block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .style(invalid_block_style)
-                    .title(format!("Title : {}", self.title_err_msg)),
-            );
-        }
-
+        // Date field
         if self.date_err_msg.is_empty() {
-            let (block, cursor) = match self.active_txt {
-                ActiveText::Date => (active_block_style, active_cursor_style),
-                _ => (reset_style, deactivate_cursor_style),
+            let (block, cursor) = if self.active_txt == ActiveText::Date {
+                (active_block_style, active_cursor_style)
+            } else {
+                (reset_style, deactivate_cursor_style)
             };
             self.date_txt.set_style(block);
             self.date_txt.set_cursor_style(cursor);
@@ -223,7 +173,7 @@ impl EntryPopup<'_> {
                 Block::default()
                     .borders(Borders::ALL)
                     .style(block)
-                    .title("Date"),
+                    .title("Date (YYYY_MM_DD_Day)"),
             );
         } else {
             let cursor = if self.active_txt == ActiveText::Date {
@@ -241,43 +191,12 @@ impl EntryPopup<'_> {
             );
         }
 
-        if self.tags_err_msg.is_empty() {
-            let (block, cursor, title) = match self.active_txt {
-                ActiveText::Tags => (
-                    active_block_style,
-                    active_cursor_style,
-                    "Tags - A comma-separated list",
-                ),
-                _ => (reset_style, deactivate_cursor_style, "Tags"),
-            };
-            self.tags_txt.set_style(block);
-            self.tags_txt.set_cursor_style(cursor);
-            self.tags_txt.set_block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .style(block)
-                    .title(title),
-            );
-        } else {
-            let cursor = if self.active_txt == ActiveText::Tags {
-                invalid_cursor_style
-            } else {
-                deactivate_cursor_style
-            };
-            self.tags_txt.set_style(invalid_block_style);
-            self.tags_txt.set_cursor_style(cursor);
-            self.tags_txt.set_block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .style(invalid_block_style)
-                    .title(format!("Tags : {}", self.date_err_msg)),
-            );
-        }
-
+        // Priority field
         if self.priority_err_msg.is_empty() {
-            let (block, cursor) = match self.active_txt {
-                ActiveText::Priority => (active_block_style, active_cursor_style),
-                _ => (reset_style, deactivate_cursor_style),
+            let (block, cursor) = if self.active_txt == ActiveText::Priority {
+                (active_block_style, active_cursor_style)
+            } else {
+                (reset_style, deactivate_cursor_style)
             };
             self.priority_txt.set_style(block);
             self.priority_txt.set_cursor_style(cursor);
@@ -303,11 +222,43 @@ impl EntryPopup<'_> {
             );
         }
 
-        frame.render_widget(&self.title_txt, chunks[0]);
-        frame.render_widget(&self.date_txt, chunks[1]);
-        frame.render_widget(&self.priority_txt, chunks[2]);
-        frame.render_widget(&self.tags_txt, chunks[3]);
+        // Tags field
+        if self.tags_err_msg.is_empty() {
+            let (block, cursor) = if self.active_txt == ActiveText::Tags {
+                (active_block_style, active_cursor_style)
+            } else {
+                (reset_style, deactivate_cursor_style)
+            };
+            self.tags_txt.set_style(block);
+            self.tags_txt.set_cursor_style(cursor);
+            self.tags_txt.set_block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .style(block)
+                    .title("Tags - A comma-separated list"),
+            );
+        } else {
+            let cursor = if self.active_txt == ActiveText::Tags {
+                invalid_cursor_style
+            } else {
+                deactivate_cursor_style
+            };
+            self.tags_txt.set_style(invalid_block_style);
+            self.tags_txt.set_cursor_style(cursor);
+            self.tags_txt.set_block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .style(invalid_block_style)
+                    .title(format!("Tags : {}", self.tags_err_msg)),
+            );
+        }
 
+        // Render widgets
+        frame.render_widget(&self.date_txt, chunks[0]);
+        frame.render_widget(&self.priority_txt, chunks[1]);
+        frame.render_widget(&self.tags_txt, chunks[2]);
+
+        // Footer
         let footer = Paragraph::new(FOOTER_TEXT)
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: false })
@@ -316,8 +267,7 @@ impl EntryPopup<'_> {
                     .borders(Borders::NONE)
                     .style(Style::default()),
             );
-
-        frame.render_widget(footer, chunks[4]);
+        frame.render_widget(footer, chunks[3]);
 
         if let Some(tags_popup) = self.tags_popup.as_mut() {
             tags_popup.render_widget(frame, area, styles)
@@ -325,32 +275,37 @@ impl EntryPopup<'_> {
     }
 
     pub fn is_input_valid(&self) -> bool {
-        self.title_err_msg.is_empty()
-            && self.date_err_msg.is_empty()
+        self.date_err_msg.is_empty()
             && self.tags_err_msg.is_empty()
             && self.priority_err_msg.is_empty()
     }
 
     pub fn validate_all(&mut self) {
-        self.validate_title();
         self.validate_date();
         self.validate_tags();
         self.validate_priority();
     }
 
-    fn validate_title(&mut self) {
-        if self.title_txt.lines()[0].is_empty() {
-            self.title_err_msg = "Title can't be empty".into();
-        } else {
-            self.title_err_msg.clear();
-        }
-    }
-
     fn validate_date(&mut self) {
-        if let Err(err) = NaiveDate::parse_from_str(self.date_txt.lines()[0].as_str(), "%d-%m-%Y") {
-            self.date_err_msg = err.to_string();
+        // Expect format "YYYY_MM_DD_Day"
+        let input = self.date_txt.lines()[0].as_str();
+        let parts: Vec<&str> = input.split('_').collect();
+        if parts.len() != 4 {
+            self.date_err_msg = "Use YYYY_MM_DD_Day".into();
+            return;
+        }
+        if let (Ok(y), Ok(m), Ok(d)) = (
+            parts[0].parse::<i32>(),
+            parts[1].parse::<u32>(),
+            parts[2].parse::<u32>(),
+        ) {
+            if NaiveDate::from_ymd_opt(y, m, d).is_some() {
+                self.date_err_msg.clear();
+            } else {
+                self.date_err_msg = "Invalid date".into();
+            }
         } else {
-            self.date_err_msg.clear();
+            self.date_err_msg = "Date format error".into();
         }
     }
 
@@ -384,29 +339,25 @@ impl EntryPopup<'_> {
     ) -> anyhow::Result<EntryPopupInputReturn> {
         if self.tags_popup.is_some() {
             self.handle_tags_popup_input(input);
-
             return Ok(EntryPopupInputReturn::KeepPopup);
         }
 
         let has_ctrl = input.modifiers.contains(KeyModifiers::CONTROL);
-
         match input.key_code {
             KeyCode::Esc => Ok(EntryPopupInputReturn::Cancel),
             KeyCode::Char('c') if has_ctrl => Ok(EntryPopupInputReturn::Cancel),
             KeyCode::Enter => self.handle_confirm(app).await,
             KeyCode::Tab | KeyCode::Down => {
                 self.active_txt = match self.active_txt {
-                    ActiveText::Title => ActiveText::Date,
                     ActiveText::Date => ActiveText::Priority,
                     ActiveText::Priority => ActiveText::Tags,
-                    ActiveText::Tags => ActiveText::Title,
+                    ActiveText::Tags => ActiveText::Date,
                 };
                 Ok(EntryPopupInputReturn::KeepPopup)
             }
             KeyCode::Up => {
                 self.active_txt = match self.active_txt {
-                    ActiveText::Title => ActiveText::Tags,
-                    ActiveText::Date => ActiveText::Title,
+                    ActiveText::Date => ActiveText::Tags,
                     ActiveText::Priority => ActiveText::Date,
                     ActiveText::Tags => ActiveText::Priority,
                 };
@@ -414,38 +365,30 @@ impl EntryPopup<'_> {
             }
             KeyCode::Char(' ') | KeyCode::Char('t') if has_ctrl => {
                 debug_assert!(self.tags_popup.is_none());
-
                 let tags = app.get_all_tags();
                 let tags_text = self
                     .tags_txt
                     .lines()
                     .first()
                     .expect("Tags text box has one line");
-
                 self.tags_popup = Some(TagsPopup::new(tags_text, tags));
-
                 Ok(EntryPopupInputReturn::KeepPopup)
             }
             _ => {
                 match self.active_txt {
-                    ActiveText::Title => {
-                        if self.title_txt.input(KeyEvent::from(input)) {
-                            self.validate_title();
-                        }
-                    }
                     ActiveText::Date => {
                         if self.date_txt.input(KeyEvent::from(input)) {
                             self.validate_date();
                         }
                     }
-                    ActiveText::Tags => {
-                        if self.tags_txt.input(KeyEvent::from(input)) {
-                            self.validate_tags();
-                        }
-                    }
                     ActiveText::Priority => {
                         if self.priority_txt.input(KeyEvent::from(input)) {
                             self.validate_priority();
+                        }
+                    }
+                    ActiveText::Tags => {
+                        if self.tags_txt.input(KeyEvent::from(input)) {
+                            self.validate_tags();
                         }
                     }
                 }
@@ -458,8 +401,7 @@ impl EntryPopup<'_> {
         let tags_popup = self
             .tags_popup
             .as_mut()
-            .expect("Tags popup must be some at this point");
-
+            .expect("Tags popup must exist");
         match tags_popup.handle_input(input) {
             TagsPopupReturn::Keep => {}
             TagsPopupReturn::Cancel => self.tags_popup = None,
@@ -476,18 +418,22 @@ impl EntryPopup<'_> {
         &mut self,
         app: &mut App<D>,
     ) -> anyhow::Result<EntryPopupInputReturn> {
-        // Validation
         self.validate_all();
         if !self.is_input_valid() {
             return Ok(EntryPopupInputReturn::KeepPopup);
         }
 
-        let title = self.title_txt.lines()[0].to_owned();
-        let date = NaiveDate::parse_from_str(self.date_txt.lines()[0].as_str(), "%d-%m-%Y")
-            .expect("Date must be valid here");
+        // Use the date string as the title (since no title field)
+        let title = self.date_txt.lines()[0].to_owned();
 
+        // Parse the date (ignore day-of-week portion)
+        let input = self.date_txt.lines()[0].as_str();
+        let parts: Vec<&str> = input.split('_').collect();
+        let year = parts[0].parse().unwrap();
+        let month = parts[1].parse().unwrap();
+        let day = parts[2].parse().unwrap();
         let date = Utc
-            .with_ymd_and_hms(date.year(), date.month(), date.day(), 0, 0, 0)
+            .with_ymd_and_hms(year, month, day, 0, 0, 0)
             .unwrap();
 
         let tags = text_to_tags(
@@ -496,10 +442,9 @@ impl EntryPopup<'_> {
                 .first()
                 .expect("Tags TextBox have one line"),
         );
-
         let priority = match self.priority_txt.lines().first().unwrap() {
             num if num.is_empty() => None,
-            num => Some(num.parse().expect("Priority must be validated before")),
+            num => Some(num.parse().expect("Priority must be validated")),
         };
 
         if self.is_edit_entry {
